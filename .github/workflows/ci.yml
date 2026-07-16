@@ -63,8 +63,8 @@ jobs:
         - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
           with:
             tool: nextest
-        - run: cargo clippy --all-targets -- -D warnings
-        - run: cargo nextest run --all-targets --no-tests=pass
+        - run: cargo clippy --all-targets --locked -- -D warnings
+        - run: cargo nextest run --all-targets --no-tests=pass --locked
 
   # Advisory scan. Blocking, to match `just ci`; a fresh upstream advisory can
   # therefore red-line an unrelated PR. Flip to advisory-only if that bites.
@@ -93,10 +93,10 @@ jobs:
             persist-credentials: false
         - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         # Runtime-download path: fetches the .tgz, extracts, binds.
-        - run: cargo run --example smoke
+        - run: cargo run --example smoke --locked
         # Compile-time-embedded path: build.rs auto-downloads via curl, embeds
         # the bytes, then bind_bundled() extracts + binds them.
-        - run: cargo run --example smoke --features bundled
+        - run: cargo run --example smoke --features bundled --locked
 
     # Keeps the declared MSRV honest. rust-version = "1.88" is the verified floor
     # (the dependency tree's own rust-version requirement); this fails CI if code
@@ -117,4 +117,29 @@ jobs:
                 ~/.cargo/registry
                 ~/.cargo/bin
                 target
-        - run: cargo check
+        - run: cargo check --locked
+
+  # Docs gate. Builds exactly what docs.rs renders — the bundled-only API — with
+  # warnings as errors, so a broken intra-doc link (or any doc regression) fails
+  # CI instead of surfacing only after publish. DOCS_RS=1 trips build.rs's offline
+  # stub, so this documents the `bundled` API without downloading pdfium.
+    docs:
+        name: docs (docs.rs config)
+        runs-on: ubuntu-latest
+        env:
+            DOCS_RS: "1"
+            RUSTDOCFLAGS: "-D warnings"
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - name: get stable Rust
+          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          with:
+            toolchain: stable
+            cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
+            cache-directories: |
+                ~/.cargo/registry
+                ~/.cargo/bin
+                target
+        - run: cargo doc --no-deps --features bundled --locked
