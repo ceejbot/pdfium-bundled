@@ -101,17 +101,10 @@ pub use pdfium_render;
 use pdfium_render::prelude::Pdfium;
 use thiserror::Error;
 
-// ── Public constants ─────────────────────────────────────────────────────────
+mod platform;
 
-/// The `bblanchon/pdfium-binaries` release tag to download
-/// ([`chromium/7881`](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F7881)).
-///
-/// Must track the pdfium build that `pdfium-render`'s `pdfium_latest` feature
-/// targets: a mismatch still downloads and compiles but fails at `bind()` with
-/// a missing-symbol error. `build.rs` pins the same value.
-pub const PDFIUM_VERSION: &str = "7881";
-
-const BASE_URL: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download";
+pub use crate::platform::PDFIUM_VERSION;
+use crate::platform::{BASE_URL, PlatformInfo, platform_for};
 
 // ── Error type ───────────────────────────────────────────────────────────────
 
@@ -139,60 +132,15 @@ pub enum Error {
 
 // ── Internal: platform metadata ──────────────────────────────────────────────
 
-struct PlatformInfo {
-    /// Asset filename in the GitHub release, e.g. `pdfium-mac-arm64.tgz`.
-    archive_name: &'static str,
-    /// Relative path inside the archive, e.g. `lib/libpdfium.dylib`.
-    lib_path_in_archive: &'static str,
-    /// Filename to write on disk, e.g. `libpdfium.dylib`.
-    lib_name: &'static str,
-}
-
+/// Resolves the current host's pdfium archive, mapping an unsupported platform
+/// to [`Error::UnsupportedPlatform`]. The lookup table lives in `platform.rs`,
+/// shared verbatim with `build.rs` so the two can't drift.
 fn detect_platform() -> Result<PlatformInfo, Error> {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-
-    match (os, arch) {
-        ("macos", "aarch64") => Ok(PlatformInfo {
-            archive_name: "pdfium-mac-arm64.tgz",
-            lib_path_in_archive: "lib/libpdfium.dylib",
-            lib_name: "libpdfium.dylib",
-        }),
-        ("macos", "x86_64") => Ok(PlatformInfo {
-            archive_name: "pdfium-mac-x64.tgz",
-            lib_path_in_archive: "lib/libpdfium.dylib",
-            lib_name: "libpdfium.dylib",
-        }),
-        ("linux", "x86_64") => Ok(PlatformInfo {
-            archive_name: "pdfium-linux-x64.tgz",
-            lib_path_in_archive: "lib/libpdfium.so",
-            lib_name: "libpdfium.so",
-        }),
-        ("linux", "aarch64") => Ok(PlatformInfo {
-            archive_name: "pdfium-linux-arm64.tgz",
-            lib_path_in_archive: "lib/libpdfium.so",
-            lib_name: "libpdfium.so",
-        }),
-        ("windows", "x86_64") => Ok(PlatformInfo {
-            archive_name: "pdfium-win-x64.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        ("windows", "aarch64") => Ok(PlatformInfo {
-            archive_name: "pdfium-win-arm64.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        ("windows", "x86") => Ok(PlatformInfo {
-            archive_name: "pdfium-win-x86.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        (os, arch) => Err(Error::UnsupportedPlatform {
-            os: os.to_string(),
-            arch: arch.to_string(),
-        }),
-    }
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    platform_for(os, arch).ok_or_else(|| Error::UnsupportedPlatform {
+        os: os.to_string(),
+        arch: arch.to_string(),
+    })
 }
 
 // ── Cache directory resolution ───────────────────────────────────────────────
@@ -562,5 +510,19 @@ mod tests {
         assert!(!info.archive_name.is_empty());
         assert!(!info.lib_path_in_archive.is_empty());
         assert!(!info.lib_name.is_empty());
+    }
+
+    #[test]
+    fn platform_for_maps_a_known_target() {
+        let linux = platform_for("linux", "x86_64").expect("linux/x86_64 is supported");
+        assert_eq!(linux.archive_name, "pdfium-linux-x64.tgz");
+        assert_eq!(linux.lib_path_in_archive, "lib/libpdfium.so");
+        assert_eq!(linux.lib_name, "libpdfium.so");
+    }
+
+    #[test]
+    fn platform_for_rejects_unknown_targets() {
+        assert!(platform_for("freebsd", "x86_64").is_none());
+        assert!(platform_for("linux", "riscv64").is_none());
     }
 }

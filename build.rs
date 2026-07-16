@@ -9,64 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-// Keep in sync with lib.rs PDFIUM_VERSION: the build-time download and the
-// runtime bind must target the same pdfium build, or bind() fails.
-const PDFIUM_VERSION: &str = "7881";
-const BASE_URL: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download";
-
-// ── Platform metadata ────────────────────────────────────────────────────────
-
-struct PlatformBundle {
-    archive_name: &'static str,
-    lib_path_in_archive: &'static str,
-    lib_name: &'static str,
-}
-
-fn detect_bundle_platform(os: &str, arch: &str) -> Result<PlatformBundle, String> {
-    match (os, arch) {
-        ("macos", "aarch64") => Ok(PlatformBundle {
-            archive_name: "pdfium-mac-arm64.tgz",
-            lib_path_in_archive: "lib/libpdfium.dylib",
-            lib_name: "libpdfium.dylib",
-        }),
-        ("macos", "x86_64") => Ok(PlatformBundle {
-            archive_name: "pdfium-mac-x64.tgz",
-            lib_path_in_archive: "lib/libpdfium.dylib",
-            lib_name: "libpdfium.dylib",
-        }),
-        ("linux", "x86_64") => Ok(PlatformBundle {
-            archive_name: "pdfium-linux-x64.tgz",
-            lib_path_in_archive: "lib/libpdfium.so",
-            lib_name: "libpdfium.so",
-        }),
-        ("linux", "aarch64") => Ok(PlatformBundle {
-            archive_name: "pdfium-linux-arm64.tgz",
-            lib_path_in_archive: "lib/libpdfium.so",
-            lib_name: "libpdfium.so",
-        }),
-        ("windows", "x86_64") => Ok(PlatformBundle {
-            archive_name: "pdfium-win-x64.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        ("windows", "aarch64") => Ok(PlatformBundle {
-            archive_name: "pdfium-win-arm64.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        ("windows", "x86") => Ok(PlatformBundle {
-            archive_name: "pdfium-win-x86.tgz",
-            lib_path_in_archive: "bin/pdfium.dll",
-            lib_name: "pdfium.dll",
-        }),
-        (os, arch) => Err(format!(
-            "pdfium-bundled[bundled]: unsupported target {os}/{arch}.\n\
-             Supported: macos/aarch64|x86_64, linux/x86_64|aarch64,\n\
-             windows/x86_64|aarch64|x86.\n\
-             Set PDFIUM_BUNDLE_LIB=/path/to/libpdfium to provide a custom library."
-        )),
-    }
-}
+// PDFIUM_VERSION, BASE_URL, PlatformInfo, and platform_for() are shared
+// verbatim with the library via include!, so the build-time download and the
+// runtime bind can never target different pdfium builds. See src/platform.rs.
+include!("src/platform.rs");
 
 // ── Cache directory ──────────────────────────────────────────────────────────
 
@@ -190,7 +136,14 @@ fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
         return path;
     }
 
-    let bundle = detect_bundle_platform(target_os, target_arch).unwrap_or_else(|e| panic!("{e}"));
+    let bundle = platform_for(target_os, target_arch).unwrap_or_else(|| {
+        panic!(
+            "pdfium-bundled[bundled]: unsupported target {target_os}/{target_arch}.\n\
+             Supported: macos/aarch64|x86_64, linux/x86_64|aarch64,\n\
+             windows/x86_64|aarch64|x86.\n\
+             Set PDFIUM_BUNDLE_LIB=/path/to/libpdfium to provide a custom library."
+        )
+    });
 
     let cache_dir = build_cache_dir(target_os, target_arch);
     let cached_lib = cache_dir.join(bundle.lib_name);
