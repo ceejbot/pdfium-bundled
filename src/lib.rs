@@ -80,9 +80,14 @@
 //! ## Environment variable overrides
 //!
 //! - `PDFIUM_LIB_PATH` — path to an existing pdfium library; skips download.
-//! - `PDFIUM_BUNDLED_CACHE_DIR` — override the default cache directory.
+//! - `PDFIUM_BUNDLED_CACHE_DIR` — override the default (runtime) cache
+//!   directory.
+//! - `PDFIUM_NO_AUTO_DOWNLOAD` — never hit the network; error unless the
+//!   library is already cached (for CI).
 //! - `PDFIUM_BUNDLE_LIB` — (compile time) path to the dylib to embed when the
 //!   `bundled` feature is active.
+//! - `PDFIUM_BUILD_CACHE_DIR` — (compile time) override the build-time download
+//!   cache.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -160,6 +165,7 @@ fn detect_platform() -> Result<PlatformInfo, Error> {
 /// Override the whole path by setting `PDFIUM_BUNDLED_CACHE_DIR`.
 ///
 /// [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+#[must_use]
 pub fn pdfium_cache_dir() -> PathBuf {
     let override_dir = std::env::var_os("PDFIUM_BUNDLED_CACHE_DIR").map(PathBuf::from);
 
@@ -193,17 +199,13 @@ static RESOLVED_PATH: OnceLock<PathBuf> = OnceLock::new();
 /// access needed on next call to [`ensure_pdfium_library`]).
 ///
 /// Also returns `true` when `PDFIUM_LIB_PATH` points to an existing file.
+#[must_use]
 pub fn is_pdfium_cached() -> bool {
-    if let Ok(p) = std::env::var("PDFIUM_LIB_PATH") {
-        return PathBuf::from(p).exists();
-    }
-    if let Ok(info) = detect_platform() {
-        return pdfium_cache_dir().join(info.lib_name).exists();
-    }
-    false
+    cached_pdfium_path().is_some()
 }
 
 /// Returns the on-disk path to the PDFium library, or `None` if not cached.
+#[must_use]
 pub fn cached_pdfium_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("PDFIUM_LIB_PATH") {
         let pb = PathBuf::from(p);
