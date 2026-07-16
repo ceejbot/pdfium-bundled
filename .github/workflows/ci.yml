@@ -1,0 +1,120 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    # Formatting gate. MUST use nightly: .rustfmt.toml enables nightly-only
+    # options (wrap_comments, imports_granularity, group_imports) that STABLE
+    # rustfmt silently ignores — stable would pass while `just ci` (nightly)
+    # fails on the same code.
+    fmt:
+        name: fmt (nightly)
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - name: get nightly Rust
+          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          with:
+            toolchain: nightly
+            components: rustfmt
+            cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
+            cache-directories: |
+                ~/.cargo/registry
+                ~/.cargo/bin
+                target
+        - run: cargo +nightly fmt --check --all
+
+  # Clippy + tests. Default features ONLY — this never downloads the pdfium
+  # binary. The bundled path is linted/exercised separately (see `bind`),
+  # mirroring the `just ci` vs `just check-bundled` split.
+    test:
+        name: clippy + test
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - name: get Rust 1.88
+          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          with:
+            toolchain: 1.88
+            components: clippy
+            cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
+            cache-directories: |
+                ~/.cargo/registry
+                ~/.cargo/bin
+                target
+        - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+          with:
+            tool: nextest
+        - run: cargo clippy --all-targets -- -D warnings
+        - run: cargo nextest run --all-targets --no-tests=pass
+
+  # Advisory scan. Blocking, to match `just ci`; a fresh upstream advisory can
+  # therefore red-line an unrelated PR. Flip to advisory-only if that bites.
+    audit:
+        name: cargo audit
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+          with:
+            tool: cargo-audit
+        - run: cargo audit
+
+  # The drift-catcher. A real bind() is the ONLY thing that catches a
+  # PDFIUM_VERSION / pdfium-render mismatch: download + extract + `cargo build`
+  # all succeed, and only `Pdfium::bind_to_library()` fails (missing symbol at
+  # load). `cargo test`/`clippy` cannot see this — so we run the example.
+    bind:
+        name: bind end-to-end (linux-x86_64)
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        # Runtime-download path: fetches the .tgz, extracts, binds.
+        - run: cargo run --example smoke
+        # Compile-time-embedded path: build.rs auto-downloads via curl, embeds
+        # the bytes, then bind_bundled() extracts + binds them.
+        - run: cargo run --example smoke --features bundled
+
+    # Keeps the declared MSRV honest. rust-version = "1.88" is the verified floor
+    # (the dependency tree's own rust-version requirement); this fails CI if code
+    # ever starts needing something newer. Default features only.
+    msrv:
+        name: msrv (1.88)
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+          with:
+            persist-credentials: false
+        - name: get Rust 1.88
+          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          with:
+            toolchain: 1.88
+            cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
+            cache-directories: |
+                ~/.cargo/registry
+                ~/.cargo/bin
+                target
+        - run: cargo check
