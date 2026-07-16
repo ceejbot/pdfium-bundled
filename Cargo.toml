@@ -1,6 +1,6 @@
 [package]
 name = "pdfium-bundled"
-version = "0.1.0"
+version = "0.1.1+pdfium-7881"
 edition = "2024"
 rust-version = "1.88"
 authors      = ["C J Silverio <ceejceej@gmail.com>"]
