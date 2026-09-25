@@ -35,3 +35,33 @@ setup:
 # Format the source.
 @fmt:
 	cargo +nightly fmt --all
+
+# Regenerate the digest table in src/platform.rs for a pdfium build: download
+# the seven release archives, verify each against upstream's SLSA attestation
+# with `gh attestation verify`, extract, and print archive + library SHA-256s
+# ready to paste. Needs network and an authenticated `gh`.
+pin-digests VERSION:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	version="{{VERSION}}"
+	base="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${version}"
+	tmp="$(mktemp -d)"
+	trap 'rm -rf "$tmp"' EXIT
+	cd "$tmp"
+	for name in mac-arm64 mac-x64 linux-x64 linux-arm64 win-x64 win-arm64 win-x86; do
+		curl -fsSL "$base/pdfium-$name.tgz" -o "pdfium-$name.tgz"
+	done
+	for archive in pdfium-*.tgz; do
+		gh attestation verify "$archive" --repo bblanchon/pdfium-binaries \
+			--signer-workflow bblanchon/pdfium-binaries/.github/workflows/build-all.yml >/dev/null
+		echo "attestation ok: $archive" >&2
+	done
+	sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+	echo "// chromium/${version} — verified against upstream's attestation on $(date -u +%F)"
+	for archive in pdfium-*.tgz; do
+		name="${archive%.tgz}"
+		mkdir -p "x/$name"
+		tar -xzf "$archive" -C "x/$name"
+		lib="$(find "x/$name" -type f \( -name 'libpdfium.*' -o -name 'pdfium.dll' \) | head -1)"
+		printf '%s\n    archive_sha256: "%s",\n    lib_sha256: "%s",\n' "$archive" "$(sha "$archive")" "$(sha "$lib")"
+	done

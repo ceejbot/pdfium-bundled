@@ -97,6 +97,24 @@ jobs:
         # Compile-time-embedded path: build.rs auto-downloads via curl, embeds
         # the bytes, then bind_bundled() extracts + binds them.
         - run: cargo run --example smoke --features bundled --locked
+        # Tamper check: corrupt the runtime cache the first smoke populated and
+        # prove bind refuses it. Offline, so the crate cannot quietly heal by
+        # re-downloading — the failure has to be the digest check itself.
+        - name: refuse a tampered cached library
+          run: |
+              lib="$(find ~/.cache/pdfium-bundled -type f -name 'libpdfium.so' | head -1)"
+              test -n "$lib" || { echo "no cached libpdfium.so to tamper with" >&2; exit 1; }
+              printf 'x' >> "$lib"
+              set +e
+              out="$(PDFIUM_NO_AUTO_DOWNLOAD=1 cargo run --example smoke --locked 2>&1)"
+              status=$?
+              set -e
+              printf '%s\n' "$out"
+              if [ "$status" -eq 0 ]; then
+                  echo "tampered library was accepted" >&2
+                  exit 1
+              fi
+              grep -q 'does not match the pinned digest' <<<"$out"
 
     # Keeps the declared MSRV honest. rust-version = "1.88" is the verified floor
     # (the dependency tree's own rust-version requirement); this fails CI if code

@@ -15,9 +15,11 @@ On the first call to [`bind_pdfium`] / [`ensure_pdfium_library`], the crate:
 1. Checks the local cache for the platform library.
 2. If it's missing, downloads the matching `.tgz` from
    [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) and extracts it.
-3. Binds the library and hands you a ready-to-use `Pdfium`.
+3. Checks the archive and the extracted library against the SHA-256 digests pinned in
+   the crate (see [Integrity](#integrity)).
+4. Binds the library and hands you a ready-to-use `Pdfium`.
 
-Every later call skips the network — the library is already cached.
+Every later call skips the network — the library is already cached (and re-checked).
 
 ## Install
 
@@ -71,17 +73,43 @@ access is ever required.
 | Network needed at runtime   | once                       | never               |
 | Network needed at build     | never                      | once                |
 
+## Integrity
+
+The library this crate loads is native code running in your process, so nothing is
+trusted on the strength of a URL. `src/platform.rs` pins, per platform, the SHA-256 of
+the pinned release archive and of the shared library inside it. The archive digest is
+the same value upstream signs as a subject of its SLSA provenance attestation, which is
+how the table is regenerated on a bump:
+
+```sh
+just pin-digests 8066   # download, `gh attestation verify`, extract, print the table
+```
+
+The pins are enforced on every download (before the archive is unpacked), on every
+cached copy at build time and at run time (a stale entry is discarded and refetched, or
+rewritten from the embedded bytes), and on every bind — [`bind_pdfium_from_path`] hashes
+the file before `dlopen`, whichever path produced it. A mismatch is
+`Error::DigestMismatch` naming the expected and actual digests; under `bundled` it is a
+build failure. Nothing is loaded.
+
+The one exemption is a library you supplied yourself (`PDFIUM_BUNDLE_LIB`,
+`PDFIUM_LIB_PATH`, or a `bind_pdfium_from_path` argument) with
+`PDFIUM_ALLOW_UNVERIFIED_LIB` set to a non-empty value, for people building their own
+pdfium. Each acceptance is logged. Downloaded and cached copies are never exempt, and a
+binary built with the opt-out needs it at run time too.
+
 ## Configuration
 
 All optional, all read from the environment:
 
-| Variable                   | Effect                                                                      |
-| -------------------------- | --------------------------------------------------------------------------- |
-| `PDFIUM_LIB_PATH`          | Use an existing `libpdfium` at this path; skip the download entirely.       |
-| `PDFIUM_BUNDLED_CACHE_DIR` | Override the cache directory (see below).                                   |
-| `PDFIUM_NO_AUTO_DOWNLOAD`  | Never hit the network; error unless the library is already cached (for CI). |
-| `PDFIUM_BUNDLE_LIB`        | *(build time, `bundled`)* Path to the library to embed.                     |
-| `PDFIUM_BUILD_CACHE_DIR`   | *(build time, `bundled`)* Override the build-time download cache.           |
+| Variable                     | Effect                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `PDFIUM_LIB_PATH`            | Use an existing `libpdfium` at this path; skip the download (still verified at bind). |
+| `PDFIUM_BUNDLED_CACHE_DIR`   | Override the cache directory (see below).                                   |
+| `PDFIUM_NO_AUTO_DOWNLOAD`    | Never hit the network; error unless the library is already cached (for CI). |
+| `PDFIUM_ALLOW_UNVERIFIED_LIB`| Accept an explicitly supplied library whose digest does not match the pin. See [Integrity](#integrity). |
+| `PDFIUM_BUNDLE_LIB`          | *(build time, `bundled`)* Path to the library to embed (verified against the pin). |
+| `PDFIUM_BUILD_CACHE_DIR`     | *(build time, `bundled`)* Override the build-time download cache.           |
 
 ### Cache location
 
@@ -128,5 +156,6 @@ Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at y
 
 [`bind_pdfium`]: https://docs.rs/pdfium-bundled/latest/pdfium_bundled/fn.bind_pdfium.html
 [`bind_bundled`]: https://docs.rs/pdfium-bundled/latest/pdfium_bundled/fn.bind_bundled.html
+[`bind_pdfium_from_path`]: https://docs.rs/pdfium-bundled/latest/pdfium_bundled/fn.bind_pdfium_from_path.html
 [`ensure_pdfium_library`]: https://docs.rs/pdfium-bundled/latest/pdfium_bundled/fn.ensure_pdfium_library.html
 [`PDFIUM_VERSION`]: https://docs.rs/pdfium-bundled/latest/pdfium_bundled/constant.PDFIUM_VERSION.html

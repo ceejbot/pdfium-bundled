@@ -6,14 +6,21 @@
 //   2. Auto-download from bblanchon/pdfium-binaries via `curl`, cached under
 //      $CARGO_HOME/pdfium-bundled/{VERSION}/{os}-{arch}/ (override the root
 //      with `PDFIUM_BUILD_CACHE_DIR`).
+//
+// Whatever the source, the bytes that reach `include_bytes!` must hash to the
+// `lib_sha256` pinned for the target in src/platform.rs, and a downloaded
+// archive must hash to its `archive_sha256` before it is unpacked. Only an
+// explicit `PDFIUM_BUNDLE_LIB` can opt out, via `PDFIUM_ALLOW_UNVERIFIED_LIB`.
 
 use std::path::{Path, PathBuf};
 
 // PDFIUM_VERSION, PDFIUM_API_FLOOR, BASE_URL, PlatformInfo, and platform_for()
 // are shared verbatim with the library via include!, so the build-time download
 // and the runtime bind can never target different pdfium builds. See
-// src/platform.rs.
+// src/platform.rs. The digest helpers come in the same way, so the embed and
+// the bind enforce the same pins.
 include!("src/platform.rs");
+include!("src/integrity.rs");
 
 // ── Cache directory ──────────────────────────────────────────────────────────
 
@@ -120,9 +127,36 @@ fn extract_lib(tgz_path: &Path, lib_path_in_archive: &str, dest: &Path) {
     );
 }
 
+// ── Verification helpers ─────────────────────────────────────────────────────
+
+fn read_bytes(path: &Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|e| panic!("pdfium-bundled: cannot read {}: {e}", path.display()))
+}
+
+/// Checks a file against a pinned digest, returning the mismatch instead of
+/// panicking so each call site can decide between refusing and refetching.
+fn check_file(what: &'static str, expected: &str, path: &Path) -> Result<(), DigestMismatch> {
+    verify_digest(what, expected, &read_bytes(path))
+}
+
+/// The one place an unverified library is accepted: the caller supplied it
+/// explicitly and set the opt-out. Loud on purpose.
+fn accept_unverified(path: &Path) -> PathBuf {
+    println!(
+        "cargo:warning=pdfium-bundled[bundled]: {ALLOW_UNVERIFIED_ENV} is set — embedding {} WITHOUT verifying \
+         its digest. The resulting binary loads native code this crate has not vouched for.",
+        path.display()
+    );
+    path.to_path_buf()
+}
+
 // ── Path resolution ──────────────────────────────────────────────────────────
 
 fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
+    // The platform table is needed even for an explicit path: it holds the
+    // digest the path must match.
+    let bundle = platform_for(target_os, target_arch);
+
     if let Ok(p) = std::env::var("PDFIUM_BUNDLE_LIB")
         && !p.is_empty()
     {
@@ -133,16 +167,33 @@ fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
                  Check the path and try again."
             );
         }
-        println!("cargo:warning=pdfium-bundled[bundled]: using PDFIUM_BUNDLE_LIB={p}");
+        if unverified_allowed() {
+            return accept_unverified(&path);
+        }
+        let Some(bundle) = bundle else {
+            panic!(
+                "pdfium-bundled[bundled]: no pinned digest for target {target_os}/{target_arch}, so \
+                 PDFIUM_BUNDLE_LIB={p} cannot be verified. Set {ALLOW_UNVERIFIED_ENV}=1 to embed it anyway."
+            );
+        };
+        if let Err(mismatch) = check_file("library", bundle.lib_sha256, &path) {
+            panic!(
+                "pdfium-bundled[bundled]: refusing PDFIUM_BUNDLE_LIB={p}: {mismatch}.\n\
+                 The pinned digest is for chromium/{PDFIUM_VERSION} {}; supply that build, or set \
+                 {ALLOW_UNVERIFIED_ENV}=1 to embed a library this crate has not vouched for.",
+                bundle.lib_name
+            );
+        }
+        println!("cargo:warning=pdfium-bundled[bundled]: using PDFIUM_BUNDLE_LIB={p} (digest verified)");
         return path;
     }
 
-    let bundle = platform_for(target_os, target_arch).unwrap_or_else(|| {
+    let bundle = bundle.unwrap_or_else(|| {
         panic!(
             "pdfium-bundled[bundled]: unsupported target {target_os}/{target_arch}.\n\
              Supported: macos/aarch64|x86_64, linux/x86_64|aarch64,\n\
              windows/x86_64|aarch64|x86.\n\
-             Set PDFIUM_BUNDLE_LIB=/path/to/libpdfium to provide a custom library."
+             Set PDFIUM_BUNDLE_LIB=/path/to/libpdfium (and {ALLOW_UNVERIFIED_ENV}=1) to provide a custom library."
         )
     });
 
@@ -150,14 +201,29 @@ fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
     let cached_lib = cache_dir.join(bundle.lib_name);
 
     if cached_lib.exists() {
-        println!(
-            "cargo:warning=pdfium-bundled[bundled]: cache hit — {} for {target_os}/{target_arch}",
-            bundle.lib_name
-        );
-        return cached_lib;
+        match check_file("library", bundle.lib_sha256, &cached_lib) {
+            Ok(()) => {
+                println!(
+                    "cargo:warning=pdfium-bundled[bundled]: cache hit — {} for {target_os}/{target_arch} (digest \
+                     verified)",
+                    bundle.lib_name
+                );
+                return cached_lib;
+            }
+            Err(mismatch) => {
+                // The cache is ours to manage: discard the bad copy and fetch
+                // a fresh one rather than trusting it or giving up.
+                println!(
+                    "cargo:warning=pdfium-bundled[bundled]: discarding cached {}: {mismatch}; re-downloading",
+                    cached_lib.display()
+                );
+                std::fs::remove_file(&cached_lib)
+                    .unwrap_or_else(|e| panic!("pdfium-bundled: cannot remove {}: {e}", cached_lib.display()));
+            }
+        }
     }
 
-    // Cache miss: download + extract
+    // Cache miss: download + verify + extract + verify
     std::fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
         panic!(
             "pdfium-bundled: failed to create cache dir {}: {e}",
@@ -169,13 +235,32 @@ fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
     let tgz_path = cache_dir.join(bundle.archive_name);
 
     download_file(&url, &tgz_path);
+    if let Err(mismatch) = check_file("archive", bundle.archive_sha256, &tgz_path) {
+        let _ = std::fs::remove_file(&tgz_path);
+        panic!(
+            "pdfium-bundled[bundled]: refusing {url}: {mismatch}.\n\
+             The release asset no longer matches the digest pinned in src/platform.rs. Do not work around \
+             this: confirm upstream's attestation (`just pin-digests {PDFIUM_VERSION}`) before changing the pin."
+        );
+    }
     extract_lib(&tgz_path, bundle.lib_path_in_archive, &cached_lib);
 
     // Remove the compressed archive — the extracted lib stays in the cache.
     let _ = std::fs::remove_file(&tgz_path);
 
+    // The archive matched, so a library mismatch here means the table itself
+    // is wrong (or extraction is): a bug to fix, never a build to ship.
+    if let Err(mismatch) = check_file("library", bundle.lib_sha256, &cached_lib) {
+        let _ = std::fs::remove_file(&cached_lib);
+        panic!(
+            "pdfium-bundled[bundled]: {mismatch} for {} extracted from a verified {}; the lib_sha256 pin in \
+             src/platform.rs is inconsistent with its archive_sha256",
+            bundle.lib_name, bundle.archive_name
+        );
+    }
+
     println!(
-        "cargo:warning=pdfium-bundled[bundled]: cached {} at {}",
+        "cargo:warning=pdfium-bundled[bundled]: cached {} at {} (digest verified)",
         bundle.lib_name,
         cached_lib.display()
     );
@@ -206,6 +291,7 @@ fn main() {
     assert_pin_at_least_api_floor();
 
     println!("cargo:rerun-if-env-changed=PDFIUM_BUNDLE_LIB");
+    println!("cargo:rerun-if-env-changed={ALLOW_UNVERIFIED_ENV}");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_BUNDLED");
     println!("cargo:rerun-if-env-changed=PDFIUM_BUILD_CACHE_DIR");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
@@ -228,6 +314,9 @@ fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
     let lib_src = resolve_lib(&target_os, &target_arch);
+    // A verified file can still be replaced on disk between builds (a new
+    // PDFIUM_BUNDLE_LIB, a refreshed cache); re-run so the check re-runs.
+    println!("cargo:rerun-if-changed={}", lib_src.display());
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
 

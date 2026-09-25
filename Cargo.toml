@@ -1,6 +1,6 @@
 [package]
 name = "pdfium-bundled"
-version = "0.1.2+pdfium-8066"
+version = "0.2.0+pdfium-8066"
 edition = "2024"
 rust-version = "1.88"
 authors      = ["C J Silverio <ceejceej@gmail.com>"]
@@ -22,6 +22,10 @@ features = ["bundled"]
 etcetera = "0.11.0"
 flate2       = "1"
 pdfium-render = { version = "0.9", features = ["pdfium_latest", "image_latest", "thread_safe"] }
+# Verifies every downloaded archive and every loaded library against the
+# digests pinned in src/platform.rs. Also a build-dependency: build.rs shares
+# src/integrity.rs via include! and checks the embedded library the same way.
+sha2         = "0.11"
 tar          = "0.4"
 thiserror    = "2"
 # Dead-simple blocking HTTP client. rustls default pulls ring + bundled
@@ -31,6 +35,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [build-dependencies]
 flate2 = "1"
+sha2   = "0.11"
 tar    = "0.4"
 
 [features]
