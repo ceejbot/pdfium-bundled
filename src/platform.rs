@@ -13,13 +13,23 @@
 //     returns `Option` so each caller builds its own error type.
 
 /// The `bblanchon/pdfium-binaries` release tag to download
-/// ([`chromium/7881`](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F7881)).
+/// ([`chromium/8066`](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F8066)).
 ///
-/// Must track the pdfium build that `pdfium-render`'s `pdfium_latest` feature
-/// targets: a mismatch still downloads and compiles but fails at `bind()` with
-/// a missing-symbol error. Defined here once so the runtime download and the
-/// compile-time embed can never disagree.
-pub const PDFIUM_VERSION: &str = "7881";
+/// Must be at least [`PDFIUM_API_FLOOR`], the build that `pdfium-render`'s
+/// `pdfium_latest` feature binds. Newer builds work because pdfium's C API only
+/// grows: `pdfium-render` resolves every symbol eagerly at `bind()`, so a build
+/// that dropped one would fail there with a missing-symbol error, not at
+/// compile time. An older build fails the same way. `just smoke` and the CI
+/// `bind` job exercise a real `bind()` on every change for exactly this
+/// reason. Defined here once so the runtime download and the compile-time
+/// embed can never disagree.
+pub const PDFIUM_VERSION: &str = "8066";
+
+/// The pdfium build `pdfium-render`'s `pdfium_latest` feature binds against
+/// (`pdfium_latest = ["pdfium_7881"]` in pdfium-render 0.9.x). Update this when
+/// bumping `pdfium-render` moves `pdfium_latest`; [`PDFIUM_VERSION`] must never
+/// fall below it.
+pub const PDFIUM_API_FLOOR: &str = "7881";
 
 /// Base URL for `bblanchon/pdfium-binaries` release assets.
 pub(crate) const BASE_URL: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download";

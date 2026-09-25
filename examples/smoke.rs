@@ -3,7 +3,7 @@
 //! This is the harness CI runs to catch PDFIUM_VERSION / pdfium-render drift —
 //! a failure that download + extract + `cargo build` all pass but a real
 //! `bind()` does not (missing symbol at load time). See the crate docs and
-//! `PDFIUM_VERSION` for why the pinned build must match `pdfium_latest`.
+//! `PDFIUM_VERSION` for why the pinned build must be at least `pdfium_latest`.
 //!
 //! Two library modes, both exercised by CI:
 //!   - default features: `cargo run --example smoke` (runtime download)

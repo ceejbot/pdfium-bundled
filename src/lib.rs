@@ -27,7 +27,7 @@
 //! ```sh
 //! # 1. Download and extract the platform archive (example: macOS arm64).
 //! curl -L https://github.com/bblanchon/pdfium-binaries/releases/download/ \
-//!      chromium%2F7881/pdfium-mac-arm64.tgz | tar xz
+//!      chromium%2F8066/pdfium-mac-arm64.tgz | tar xz
 //!
 //! # 2. Build with the bundled feature, pointing PDFIUM_BUNDLE_LIB at the lib.
 //! PDFIUM_BUNDLE_LIB=./lib/libpdfium.dylib \
@@ -108,8 +108,8 @@ use thiserror::Error;
 
 mod platform;
 
-pub use crate::platform::PDFIUM_VERSION;
 use crate::platform::{BASE_URL, PlatformInfo, platform_for};
+pub use crate::platform::{PDFIUM_API_FLOOR, PDFIUM_VERSION};
 
 // ── Error type ───────────────────────────────────────────────────────────────
 
@@ -462,6 +462,18 @@ fn extract_library(archive_bytes: &[u8], lib_path_in_archive: &str, dest_path: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_pdfium_is_at_least_the_api_floor() {
+        let pinned: u32 = PDFIUM_VERSION.parse().expect("PDFIUM_VERSION is a bare build number");
+        let floor: u32 = PDFIUM_API_FLOOR
+            .parse()
+            .expect("PDFIUM_API_FLOOR is a bare build number");
+        assert!(
+            pinned >= floor,
+            "PDFIUM_VERSION {pinned} is older than the {floor} build pdfium-render binds; bind() would fail"
+        );
+    }
 
     #[test]
     fn detect_platform_is_supported() {

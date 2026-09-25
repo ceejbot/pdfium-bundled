@@ -9,9 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-// PDFIUM_VERSION, BASE_URL, PlatformInfo, and platform_for() are shared
-// verbatim with the library via include!, so the build-time download and the
-// runtime bind can never target different pdfium builds. See src/platform.rs.
+// PDFIUM_VERSION, PDFIUM_API_FLOOR, BASE_URL, PlatformInfo, and platform_for()
+// are shared verbatim with the library via include!, so the build-time download
+// and the runtime bind can never target different pdfium builds. See
+// src/platform.rs.
 include!("src/platform.rs");
 
 // ── Cache directory ──────────────────────────────────────────────────────────
@@ -184,7 +185,26 @@ fn resolve_lib(target_os: &str, target_arch: &str) -> PathBuf {
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
+/// Fail the build, rather than the first `bind()`, if the pinned pdfium build
+/// ever drops below the one `pdfium-render` targets. Both consts live in
+/// `src/platform.rs`; this runs on every build, bundled or not.
+fn assert_pin_at_least_api_floor() {
+    let parse = |name: &str, value: &str| -> u32 {
+        value
+            .parse()
+            .unwrap_or_else(|_| panic!("{name} must be a bare pdfium build number, got {value:?}"))
+    };
+    let pinned = parse("PDFIUM_VERSION", PDFIUM_VERSION);
+    let floor = parse("PDFIUM_API_FLOOR", PDFIUM_API_FLOOR);
+    assert!(
+        pinned >= floor,
+        "PDFIUM_VERSION {pinned} is older than the {floor} build pdfium-render binds; bind() would fail with a missing symbol"
+    );
+}
+
 fn main() {
+    assert_pin_at_least_api_floor();
+
     println!("cargo:rerun-if-env-changed=PDFIUM_BUNDLE_LIB");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_BUNDLED");
     println!("cargo:rerun-if-env-changed=PDFIUM_BUILD_CACHE_DIR");

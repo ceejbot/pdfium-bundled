@@ -105,8 +105,9 @@ developer tool. Override it with `PDFIUM_BUNDLED_CACHE_DIR`.)
 | Linux   | `x86_64`, `aarch64`      | `libpdfium.so`   |
 | Windows | `x86_64`, `aarch64`, `x86` | `pdfium.dll`   |
 
-The bundled PDFium build is pinned by [`PDFIUM_VERSION`] and kept in step with the
-`pdfium_latest` API that `pdfium-render` targets.
+The bundled PDFium build is pinned by [`PDFIUM_VERSION`], which is kept at or
+above the build that `pdfium-render`'s `pdfium_latest` feature binds. Newer
+builds are safe because pdfium's C API only grows; CI proves it with a real bind.
 
 ## Development
 
