@@ -25,11 +25,11 @@ jobs:
         name: fmt (nightly)
         runs-on: ubuntu-latest
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
         - name: get nightly Rust
-          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
           with:
             toolchain: nightly
             components: rustfmt
@@ -47,11 +47,11 @@ jobs:
         name: clippy + test
         runs-on: ubuntu-latest
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
         - name: get stable Rust
-          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
           with:
             toolchain: stable
             components: clippy
@@ -60,7 +60,7 @@ jobs:
                 ~/.cargo/registry
                 ~/.cargo/bin
                 target
-        - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
           with:
             tool: nextest
         - run: cargo clippy --all-targets --locked -- -D warnings
@@ -72,10 +72,10 @@ jobs:
         name: cargo audit
         runs-on: ubuntu-latest
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
-        - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
           with:
             tool: cargo-audit
         - run: cargo audit
@@ -88,10 +88,10 @@ jobs:
         name: bind end-to-end (linux-x86_64)
         runs-on: ubuntu-latest
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
-        - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         # Runtime-download path: fetches the .tgz, extracts, binds.
         - run: cargo run --example smoke --locked
         # Compile-time-embedded path: build.rs auto-downloads via curl, embeds
@@ -123,11 +123,11 @@ jobs:
         name: msrv (1.88)
         runs-on: ubuntu-latest
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
         - name: get Rust 1.88
-          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
           with:
             toolchain: 1.88
             cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
@@ -148,11 +148,11 @@ jobs:
             DOCS_RS: "1"
             RUSTDOCFLAGS: "-D warnings"
         steps:
-        - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
             persist-credentials: false
         - name: get stable Rust
-          uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+          uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
           with:
             toolchain: stable
             cache-key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-arm64
